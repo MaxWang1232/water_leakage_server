@@ -1,0 +1,206 @@
+水务漏损检测系统 (MySQL版本)
+基于MySQL数据库的水务漏损检测和预测系统，提供单设备和批量设备的用水量分析、漏损预测和报警功能。
+系统架构:
+water_leakage_server/
+├── mysql_main.py              # 主程序 - Flask服务入口
+├── mysql_config.py            # 数据库配置模块
+├── mysql_cleaned_data_server.py # 数据清洗模块
+├── mysql_predict_new_data_server.py # 预测模块
+├── mysql_judger_server.py     # 判断模块
+├── clean_database.py          # 数据库清理工具
+├── gun_mysql.py              # Gunicorn配置文件
+└── README.md                 # 说明文档
+
+1. 主程序模块 (mysql_main.py)
+功能概述：
+Flask Web服务入口，提供RESTful API接口
+服务初始化和生命周期管理
+单设备和批量请求处理流程控制
+
+主要类和方法：
+WaterLeakageService: 主服务类
+_init_service(): 服务初始化，包含数据库检查和全量数据导入
+process_request(): 单设备请求处理
+process_batch_request(): 批量设备请求处理
+
+API接口：
+POST /WaterPredictor: 单设备预测接口
+POST /WaterPredictorBatch: 批量设备预测接口
+
+2. 数据库配置模块 (mysql_config.py)
+功能概述：
+
+MySQL数据库连接池管理
+数据库表结构初始化
+连接异常处理和重试机制
+
+主要类和方法：
+MySQLConfig: 数据库配置类
+_create_connection_pool(): 创建连接池
+get_connection(): 获取数据库连接（带重试机制）
+_create_tables(): 初始化数据表结构
+
+配置参数：
+主机: 10.65.49.205
+端口: 13306
+数据库: water_leakage
+连接池大小: 8个连接
+
+
+3. 数据清洗模块 (mysql_cleaned_data_server.py)
+功能概述：
+Excel数据全量清洗和导入
+实时数据增量处理
+数据格式标准化和验证
+
+主要函数：
+clean_water_data(): 主清洗函数
+全量处理模式 (is_full_clean=True): 从Excel批量导入数据
+增量处理模式: 处理单条实时数据
+数据处理逻辑：
+设备号标准化为字符串
+日期格式统一为 %Y%m%d
+用水量数据整数化处理
+无效数据过滤和异常处理
+
+4. 预测模块 (mysql_predict_new_data_server.py)
+功能概述：
+
+基于LSTM的用水量预测
+单设备和批量预测模式
+异常值处理和缺失数据填充
+
+主要类和方法：
+WaterLeakagePredictor: 预测器类
+predict_next_day(): 单设备次日用水量预测
+predict_batch(): 批量设备预测
+update_device_data(): 更新预测结果到数据库
+
+预测算法特点：
+14天历史数据窗口
+LSTM神经网络模型
+异常值检测和过滤
+零用量天数特殊处理
+
+5. 判断模块 (mysql_judger_server.py)
+功能概述：
+泄露报警判断逻辑
+多级报警分类（重度/中度/轻微/无报警）
+
+历史数据分析
+主要类和方法：
+WaterLeakageJudge: 判断器类
+judge_single_device(): 单设备报警判断
+_is_prev_7_zero(): 前7天零用量判断
+
+
+报警规则：
+
+重度报警: 真实用量 > 20倍预测值 或 单日用量 > 20吨
+中度报警: 真实用量 > 14天均值30倍 或 > 前3天最大值1.1倍
+轻微提醒: 前7天全零且当日有用水
+
+6. 数据库清理工具 (clean_database.py)
+功能概述：
+
+快速清空数据库表数据
+保留表结构，便于重新初始化
+
+使用方法：
+
+bash
+python clean_database.py
+安装和部署
+环境要求
+Python 3.9+
+MySQL 5.7+
+TensorFlow 2.x
+Flask 2.x
+
+依赖安装
+bash
+pip install flask mysql-connector-python pandas numpy tensorflow scikit-learn
+数据库配置
+修改 mysql_config.py 中的数据库连接信息：
+
+python
+DB_CONFIG = {
+    "host": "your_mysql_host",
+    "port": your_mysql_port,
+    "user": "your_username", 
+    "password": "your_password",
+    "database": "water_leakage"
+}
+启动服务
+开发环境启动
+bash
+python mysql_main.py
+生产环境启动（使用Gunicorn）
+bash
+gunicorn -c gun_mysql.py mysql_main:app
+一键重启脚本
+bash
+./full_reset.sh
+API使用示例
+单设备请求
+bash
+curl -X POST http://localhost:11027/WaterPredictor \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_number": "device_001",
+    "create_time": "20231031", 
+    "read_num": 1500
+  }'
+批量设备请求
+bash
+curl -X POST http://localhost:11027/WaterPredictorBatch \
+  -H "Content-Type: application/json" \
+  -d '[
+    {
+      "device_number": "device_001",
+      "create_time": "20231031",
+      "read_num": 1500
+    },
+    {
+      "device_number": "device_002",
+      "create_time": "20231031", 
+      "read_num": 2000
+    }
+  ]'
+数据初始化
+首次启动
+系统首次启动时会自动：
+
+检查数据库表结构并创建
+
+从Excel文件 (./test_data/test_water_leakage_data.xlsx) 全量导入数据
+初始化预测模型
+重新初始化
+如需重新导入数据：
+
+bash
+python clean_database.py  # 清空数据
+python mysql_main.py      # 重新启动服务导入数据
+监控和维护
+
+日志文件
+water_leakage_service.log: 服务运行日志
+water_mysql_access.log: API访问日志
+water_mysql_error.log: 错误日志
+
+服务管理
+bash
+# 查看服务状态
+ps aux | grep gunicorn
+
+# 停止服务
+pkill -f gunicorn
+
+# 重启服务
+kill -HUP $(cat water_mysql_gunicorn.pid)
+故障排除
+常见问题
+端口占用错误
+
+
+
